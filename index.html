@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Systems & To-Do Tracker</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React, ReactDOM & Babel CDNs -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f1117; }
+    ::-webkit-scrollbar-thumb { background: #262936; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #10b981; }
+  </style>
+</head>
+<body class="bg-[#090b10] text-white antialiased selection:bg-emerald-500 selection:text-black">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    const MONTHS = [
+      { name: 'January', short: 'Jan', days: 31 },
+      { name: 'February', short: 'Feb', days: 28 },
+      { name: 'March', short: 'Mar', days: 31 },
+      { name: 'April', short: 'Apr', days: 30 },
+      { name: 'May', short: 'May', days: 31 },
+      { name: 'June', short: 'Jun', days: 30 },
+      { name: 'July', short: 'Jul', days: 31 },
+      { name: 'August', short: 'Aug', days: 31 },
+      { name: 'September', short: 'Sep', days: 30 },
+      { name: 'October', short: 'Oct', days: 31 },
+      { name: 'November', short: 'Nov', days: 30 },
+      { name: 'December', short: 'Dec', days: 31 },
+    ];
+
+    const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+    const EMOJI_LIST = ['⏰', '🏋️', '📚', '📝', '💰', '💻', '🧘', '💧', '🏃', '🥗', '🎸', '🚀', '🔥', '⚡', '🎯'];
+
+    const DEFAULT_HABITS = [
+      { id: 'h1', name: 'Wake up at 05:00', emoji: '⏰' },
+      { id: 'h2', name: 'Gym', emoji: '🏋️' },
+      { id: 'h3', name: 'Reading / Learning', emoji: '📚' },
+      { id: 'h4', name: 'Day Planning', emoji: '📝' },
+      { id: 'h5', name: 'Budget Tracking', emoji: '💰' },
+    ];
+
+    const DEFAULT_TODOS = [
+      { id: 't1', text: 'Complete DSA / Coding practice session', priority: 'High', category: 'Code', done: false, pinned: true },
+      { id: 't2', text: 'Push daily project updates to GitHub', priority: 'High', category: 'Code', done: true, pinned: true },
+      { id: 't3', text: 'Read 10 pages of non-fiction book', priority: 'Medium', category: 'Study', done: false, pinned: false },
+    ];
+
+    function App() {
+      const [lightMode, setLightMode] = useState(() => {
+        return localStorage.getItem('ds_theme') === 'light';
+      });
+
+      const [monthIdx, setMonthIdx] = useState(() => {
+        const saved = localStorage.getItem('ds_month');
+        return saved !== null ? Number(saved) : 9; // Default October
+      });
+
+      const [habits, setHabits] = useState(() => {
+        const saved = localStorage.getItem('ds_habits');
+        return saved ? JSON.parse(saved) : DEFAULT_HABITS;
+      });
+
+      // Structure: { "monthIdx_habitId_day": true }
+      const [checks, setChecks] = useState(() => {
+        const saved = localStorage.getItem('ds_checks');
+        if (saved) return JSON.parse(saved);
+        // Seed initial demo data so charts look alive immediately
+        const seed = {};
+        DEFAULT_HABITS.forEach((h, hIdx) => {
+          for (let d = 1; d <= 12; d++) {
+            if ((d + hIdx) % 3 !== 0) seed[`9_${h.id}_${d}`] = true;
+          }
+        });
+        return seed;
+      });
+
+      const [todos, setTodos] = useState(() => {
+        const saved = localStorage.getItem('ds_todos');
+        return saved ? JSON.parse(saved) : DEFAULT_TODOS;
+      });
+
+      const [editingId, setEditingId] = useState(null);
+      const [editName, setEditName] = useState('');
+      const [emojiPickerId, setEmojiPickerId] = useState(null);
+      const [newHabitName, setNewHabitName] = useState('');
+
+      const [newTodoText, setNewTodoText] = useState('');
+      const [newTodoPriority, setNewTodoPriority] = useState('High');
+      const [newTodoCategory, setNewTodoCategory] = useState('Code');
+
+      useEffect(() => { localStorage.setItem('ds_theme', lightMode ? 'light' : 'dark'); }, [lightMode]);
+      useEffect(() => { localStorage.setItem('ds_month', monthIdx); }, [monthIdx]);
+      useEffect(() => { localStorage.setItem('ds_habits', JSON.stringify(habits)); }, [habits]);
+      useEffect(() => { localStorage.setItem('ds_checks', JSON.stringify(checks)); }, [checks]);
+      useEffect(() => { localStorage.setItem('ds_todos', JSON.stringify(todos)); }, [todos]);
+
+      const currentMonth = MONTHS[monthIdx];
+      const daysArray = useMemo(() => Array.from({ length: currentMonth.days }, (_, i) => i + 1), [currentMonth]);
+
+      const toggleCheck = (habitId, day) => {
+        const key = `${monthIdx}_${habitId}_${day}`;
+        setChecks(prev => ({ ...prev, [key]: !prev[key] }));
+      };
+
+      // Backend Calculation Function: Monthly Habit Averages & Daily Metrics
+      const stats = useMemo(() => {
+        const totalHabits = habits.length;
+        const totalDays = currentMonth.days;
+        let totalCompletedInMonth = 0;
+        let activeDaysCount = 0;
+        let perfectDays = 0;
+
+        const dailyStats = daysArray.map(day => {
+          let doneCount = 0;
+          habits.forEach(h => {
+            if (checks[`${monthIdx}_${h.id}_${day}`]) doneCount++;
+          });
+          totalCompletedInMonth += doneCount;
+          if (doneCount > 0) activeDaysCount++;
+          if (totalHabits > 0 && doneCount === totalHabits) perfectDays++;
+          const pct = totalHabits > 0 ? Math.round((doneCount / totalHabits) * 100) : 0;
+          return { day, doneCount, pct };
+        });
+
+        const totalPossible = totalHabits * totalDays;
+        const overallPct = totalPossible > 0 ? Math.round((totalCompletedInMonth / totalPossible) * 100) : 0;
+
+        // Average habits done per day across the month
+        const avgHabitsPerDay = (totalCompletedInMonth / totalDays).toFixed(1);
+        // Average days each habit was completed in the month
+        const avgDaysPerHabit = totalHabits > 0 ? (totalCompletedInMonth / totalHabits).toFixed(1) : '0.0';
+
+        // Weekly averages (Week 1 to Week 5)
+        const weeks = [0, 1, 2, 3, 4].map(wIdx => {
+          const slice = dailyStats.slice(wIdx * 7, (wIdx + 1) * 7);
+          if (slice.length === 0) return { label: `W${wIdx + 1}`, pct: 0 };
+          const avg = Math.round(slice.reduce((acc, s) => acc + s.pct, 0) / slice.length);
+          return { label: `Week ${wIdx + 1}`, pct: avg };
+        }).filter(w => w.pct >= 0);
+
+        return {
+          totalHabits,
+          totalCompletedInMonth,
+          overallPct,
+          avgHabitsPerDay,
+          avgDaysPerHabit,
+          perfectDays,
+          dailyStats,
+          weeks
+        };
+      }, [habits, checks, monthIdx, currentMonth, daysArray]);
+
+      const addHabit = (e) => {
+        e.preventDefault();
+        if (!newHabitName.trim()) return;
+        setHabits([...habits, { id: 'h_' + Date.now(), name: newHabitName.trim(), emoji: '⚡' }]);
+        setNewHabitName('');
+      };
+
+      const deleteHabit = (id) => {
+        setHabits(habits.filter(h => h.id !== id));
+      };
+
+      const saveHabitEdit = (id) => {
+        if (editName.trim()) {
+          setHabits(habits.map(h => h.id === id ? { ...h, name: editName.trim() } : h));
+        }
+        setEditingId(null);
+      };
+
+      const addTodo = (e) => {
+        e.preventDefault();
+        if (!newTodoText.trim()) return;
+        setTodos([
+          { id: 't_' + Date.now(), text: newTodoText.trim(), priority: newTodoPriority, category: newTodoCategory, done: false, pinned: false },
+          ...todos
+        ]);
+        setNewTodoText('');
+      };
+
+      // SVG Smooth Area Chart Points Generator
+      const svgChartPath = useMemo(() => {
+        const width = 900;
+        const height = 160;
+        const pts = stats.dailyStats.map((d, i) => {
+          const x = (i / Math.max(1, stats.dailyStats.length - 1)) * width;
+          const y = height - (d.pct / 100) * (height - 25) - 10;
+          return `${x},${y}`;
+        });
+        const linePath = `M ${pts.join(' L ')}`;
+        const areaPath = `${linePath} L ${width},${height} L 0,${height} Z`;
+        return { linePath, areaPath, width, height };
+      }, [stats.dailyStats]);
+
+      const bgMain = lightMode ? 'bg-slate-100 text-slate-900' : 'bg-[#090b10] text-white';
+      const cardBg = lightMode ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#12151f] border-[#222738] text-white';
+      const cellBorder = lightMode ? 'border-slate-200' : 'border-[#1e2333]';
+
+      return (
+        <div className={`min-h-screen p-3 md:p-6 transition-colors duration-200 ${bgMain}`}>
+          <div className="max-w-[1600px] mx-auto space-y-5">
+
+            {/* HEADER & MONTH TABS */}
+            <div className={`flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl border ${cardBg}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-xl">
+                  ⚡
+                </div>
+                <div>
+                  <h1 className="text-xl md:text-2xl font-extrabold tracking-tight">
+                    {currentMonth.name} <span className="text-emerald-400">Systems</span>
+                  </h1>
+                  <p className="text-xs font-medium opacity-80">Full Monthly Graphical Habit & To-Do Tracker</p>
+                </div>
+              </div>
+
+              {/* Month Selector Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto py-1">
+                {MONTHS.map((m, idx) => (
+                  <button
+                    key={m.short}
+                    onClick={() => setMonthIdx(idx)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      monthIdx === idx
+                        ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/30'
+                        : 'hover:bg-white/10 border border-transparent'
+                    }`}
+                  >
+                    {m.short}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setLightMode(!lightMode)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 transition"
+              >
+                {lightMode ? '🌙 White Font Mode' : '☀️ White BG Mode'}
+              </button>
+            </div>
+
+            {/* TOP GRAPHICAL DASHBOARD (3 CARDS) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Card 1: Radial Gauge + Avg Habits Done */}
+              <div className={`lg:col-span-4 p-4 rounded-2xl border flex items-center justify-between gap-4 ${cardBg}`}>
+                <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="10" className="opacity-15" fill="none" />
+                    <circle
+                      cx="50" cy="50" r="40"
+                      stroke="#10b981"
+                      strokeWidth="10"
+                      strokeDasharray="251.2"
+                      strokeDashoffset={251.2 - (251.2 * stats.overallPct) / 100}
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-xl font-black">{stats.overallPct}%</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Monthly</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 flex-1">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <div className="text-[11px] font-bold uppercase">Avg Habits Done</div>
+                    <div className="text-lg font-black text-emerald-400">
+                      {stats.avgHabitsPerDay} <span className="text-xs font-bold text-white">/ {stats.totalHabits}</span>
+                    </div>
+                    <div className="text-[10px] font-semibold">avg per day ({stats.avgDaysPerHabit}d/mo)</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                    <div className="text-[11px] font-bold uppercase">Completed</div>
+                    <div className="text-lg font-black">{stats.totalCompletedInMonth}</div>
+                    <div className="text-[10px] font-semibold">{stats.perfectDays} Perfect Days</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Daily Progress Bar Chart */}
+              <div className={`lg:col-span-5 p-4 rounded-2xl border flex flex-col justify-between ${cardBg}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-extrabold uppercase tracking-wider">Daily Progress ({currentMonth.days} Days)</span>
+                  <span className="text-xs font-bold text-emerald-400">Live Bar Graph</span>
+                </div>
+                <div className="h-24 flex items-end gap-1 pt-2">
+                  {stats.dailyStats.map(d => (
+                    <div key={d.day} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end">
+                      <div className="w-full bg-white/10 rounded-t-sm h-full flex items-end overflow-hidden">
+                        <div
+                          className="w-full bg-emerald-500 transition-all duration-300 rounded-t-sm"
+                          style={{ height: `${d.pct}%` }}
+                        />
+                      </div>
+                      <span className="text-[9px] font-bold">{d.day}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Card 3: Weekly Overview */}
+              <div className={`lg:col-span-3 p-4 rounded-2xl border flex flex-col justify-between ${cardBg}`}>
+                <span className="text-xs font-extrabold uppercase tracking-wider mb-2">Weekly Breakdown</span>
+                <div className="space-y-2">
+                  {stats.weeks.map(w => (
+                    <div key={w.label} className="space-y-1">
+                      <div className="flex justify-between text-xs font-bold">
+                        <span>{w.label}</span>
+                        <span className="text-emerald-400">{w.pct}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${w.pct}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* MAIN HABIT SPREADSHEET GRID */}
+            <div className={`rounded-2xl border overflow-hidden ${cardBg}`}>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr className={`border-b ${cellBorder}`}>
+                      <th rowSpan="2" className={`sticky left-0 z-20 min-w-[250px] p-3 font-extrabold text-sm border-r ${cellBorder} ${cardBg}`}>
+                        Daily Systems ⚡
+                        <span className="block text-[10px] font-semibold opacity-80">Click name or icon to edit</span>
+                      </th>
+                      {daysArray.map(d => (
+                        <th key={d} className={`p-1.5 text-center text-[10px] font-bold border-r ${cellBorder} min-w-[36px]`}>
+                          {DAY_NAMES[(d - 1) % 7]}
+                        </th>
+                      ))}
+                    </tr>
+                    <tr className={`border-b ${cellBorder}`}>
+                      {daysArray.map(d => (
+                        <th key={d} className={`p-1.5 text-center text-xs font-extrabold border-r ${cellBorder}`}>
+                          {d}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {habits.map(habit => {
+                      const habitDoneCount = daysArray.filter(d => checks[`${monthIdx}_${habit.id}_${d}`]).length;
+                      const habitPct = Math.round((habitDoneCount / currentMonth.days) * 100);
+
+                      return (
+                        <tr key={habit.id} className={`border-b ${cellBorder} hover:bg-white/[0.02] group`}>
+                          <td className={`sticky left-0 z-10 p-2.5 border-r ${cellBorder} ${cardBg}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {/* Emoji Selector */}
+                                <div className="relative">
+                                  <button
+                                    onClick={() => setEmojiPickerId(emojiPickerId === habit.id ? null : habit.id)}
+                                    className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm"
+                                  >
+                                    {habit.emoji}
+                                  </button>
+                                  {emojiPickerId === habit.id && (
+                                    <div className="absolute left-0 top-8 z-30 p-2 bg-[#1a1f2e] border border-white/20 rounded-xl shadow-xl grid grid-cols-5 gap-1 w-40">
+                                      {EMOJI_LIST.map(em => (
+                                        <button
+                                          key={em}
+                                          onClick={() => {
+                                            setHabits(habits.map(h => h.id === habit.id ? { ...h, emoji: em } : h));
+                                            setEmojiPickerId(null);
+                                          }}
+                                          className="p-1 hover:bg-white/10 rounded text-sm"
+                                        >
+                                          {em}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Editable Habit Name */}
+                                {editingId === habit.id ? (
+                                  <input
+                                    autoFocus
+                                    value={editName}
+                                    onChange={e => setEditName(e.target.value)}
+                                    onBlur={() => saveHabitEdit(habit.id)}
+                                    onKeyDown={e => e.key === 'Enter' && saveHabitEdit(habit.id)}
+                                    className="bg-black/40 border border-emerald-500 rounded px-2 py-0.5 text-xs font-bold w-full text-white focus:outline-none"
+                                  />
+                                ) : (
+                                  <span
+                                    onClick={() => { setEditingId(habit.id); setEditName(habit.name); }}
+                                    className="text-xs font-bold truncate cursor-pointer hover:text-emerald-400"
+                                  >
+                                    {habit.name}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-emerald-400">{habitPct}%</span>
+                                <button
+                                  onClick={() => deleteHabit(habit.id)}
+                                  className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-300 text-xs font-bold px-1"
+                                  title="Delete"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Checkboxes */}
+                          {daysArray.map(day => {
+                            const isChecked = !!checks[`${monthIdx}_${habit.id}_${day}`];
+                            return (
+                              <td key={day} className={`p-1 text-center border-r ${cellBorder}`}>
+                                <button
+                                  onClick={() => toggleCheck(habit.id, day)}
+                                  className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-all ${
+                                    isChecked
+                                      ? 'bg-emerald-500 text-black font-black shadow-sm shadow-emerald-500/40'
+                                      : 'bg-white/5 hover:bg-white/15 border border-white/20'
+                                  }`}
+                                >
+                                  {isChecked && '✓'}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+
+                    {/* Add New Habit Row */}
+                    <tr className={`border-b ${cellBorder}`}>
+                      <td className={`sticky left-0 z-10 p-2 border-r ${cellBorder} ${cardBg}`}>
+                        <form onSubmit={addHabit} className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            placeholder="+ Add new system..."
+                            value={newHabitName}
+                            onChange={e => setNewHabitName(e.target.value)}
+                            className="bg-white/5 border border-white/15 rounded-lg px-2.5 py-1 text-xs font-bold w-full placeholder-white/60 focus:outline-none focus:border-emerald-500"
+                          />
+                          <button type="submit" className="px-2.5 py-1 bg-emerald-500 text-black rounded-lg text-xs font-black">
+                            Add
+                          </button>
+                        </form>
+                      </td>
+                      <td colSpan={currentMonth.days} className="p-2 text-xs font-semibold opacity-75">
+                        Click any checkbox to update live graphs & monthly averages
+                      </td>
+                    </tr>
+                  </tbody>
+
+                  {/* FOOTER: ONLY GRAPHICAL PROGRESS ROW */}
+                  <tfoot>
+                    <tr className="bg-emerald-500/5">
+                      <td className={`sticky left-0 z-10 p-3 font-extrabold text-xs border-r ${cellBorder} ${cardBg}`}>
+                        Progress
+                      </td>
+                      {stats.dailyStats.map(d => (
+                        <td key={d.day} className={`p-1.5 text-center border-r ${cellBorder}`}>
+                          <div className="text-[10px] font-extrabold mb-1">{d.pct}%</div>
+                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${d.pct}%` }} />
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* BOTTOM CONSISTENCY CURVE (SMOOTH AREA GRAPH) */}
+            <div className={`p-4 rounded-2xl border ${cardBg}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-sm font-extrabold uppercase tracking-wider">Daily Consistency Curve</h2>
+                  <p className="text-xs font-semibold opacity-80">Smooth graphical trend across {currentMonth.name}</p>
+                </div>
+                <span className="text-xs font-black text-emerald-400">{stats.overallPct}% Monthly Consistency</span>
+              </div>
+              <div className="w-full overflow-hidden">
+                <svg viewBox={`0 0 ${svgChartPath.width} ${svgChartPath.height}`} className="w-full h-36 overflow-visible">
+                  <defs>
+                    <linearGradient id="emeraldGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.55" />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <path d={svgChartPath.areaPath} fill="url(#emeraldGrad)" />
+                  <path d={svgChartPath.linePath} fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+              </div>
+            </div>
+
+            {/* TO-DO SECTION */}
+            <div className={`p-5 rounded-2xl border space-y-4 ${cardBg}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
+                  <span>✅</span> To-Do
+                </h2>
+                <span className="text-xs font-bold text-emerald-400">
+                  {todos.filter(t => t.done).length} / {todos.length} Completed
+                </span>
+              </div>
+
+              <form onSubmit={addTodo} className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a new task..."
+                  value={newTodoText}
+                  onChange={e => setNewTodoText(e.target.value)}
+                  className="flex-1 min-w-[220px] bg-white/5 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-bold placeholder-white/60 focus:outline-none focus:border-emerald-500"
+                />
+                <select
+                  value={newTodoPriority}
+                  onChange={e => setNewTodoPriority(e.target.value)}
+                  className="bg-[#1a1f2e] border border-white/15 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                >
+                  <option value="High">🔥 High</option>
+                  <option value="Medium">⚡ Medium</option>
+                  <option value="Low">🌱 Low</option>
+                </select>
+                <select
+                  value={newTodoCategory}
+                  onChange={e => setNewTodoCategory(e.target.value)}
+                  className="bg-[#1a1f2e] border border-white/15 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                >
+                  <option value="Code">💻 Code</option>
+                  <option value="Study">📖 Study</option>
+                  <option value="Fitness">🏋️ Fitness</option>
+                  <option value="Personal">🎯 Personal</option>
+                </select>
+                <button type="submit" className="px-4 py-2 bg-emerald-500 text-black font-black rounded-xl text-xs">
+                  + Add Task
+                </button>
+              </form>
+
+              <div className="space-y-2">
+                {todos.map(todo => (
+                  <div
+                    key={todo.id}
+                    className={`flex items-center justify-between p-3 rounded-xl border ${cellBorder} bg-white/[0.02]`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setTodos(todos.map(t => t.id === todo.id ? { ...t, done: !t.done } : t))}
+                        className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-xs ${
+                          todo.done ? 'bg-emerald-500 text-black' : 'border border-white/30 bg-white/5'
+                        }`}
+                      >
+                        {todo.done && '✓'}
+                      </button>
+                      <span className={`text-xs font-bold ${todo.done ? 'line-through opacity-60' : ''}`}>
+                        {todo.text}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10">
+                        {todo.category}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300">
+                        {todo.priority}
+                      </span>
+                      <button
+                        onClick={() => setTodos(todos.filter(t => t.id !== todo.id))}
+                        className="text-rose-400 hover:text-rose-300 text-xs font-bold px-1.5"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
